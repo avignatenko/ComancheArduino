@@ -1,4 +1,11 @@
 
+#define SIM
+
+#ifdef SIM
+#include <si_message_port.hpp>
+
+SiMessagePort* messagePort;
+#endif
 
 
 #include "LiquidCrystal_PCF8574.h"
@@ -24,59 +31,105 @@
 //  A2 - 6 -- port 42
 
 
-// A4 as SDA, A5 as SCL 
-LiquidCrystal_PCF8574 lcd(0x26, 45, 37); // set the LCD address to 0x27 for a 16 chars and 2 line display
-LiquidCrystal_PCF8574 lcd2(0x27, 27, 19); // set the LCD address to 0x27 for a 16 chars and 2 line display
+enum Messages  {
+  REFRESH_STATE = 0, // payload: none
+  ENABLE_DISPLAY_BACKLIGHT = 1, // payload: <int 0 (left), 1 (right)> <int 0 (disable), 1 (enable)>
+  SET_DISPLAY_TEXT = 2, // payload: <int 0 (left), 1 (right)> <int 0 (line 1), 1 (line 2)> || <string text>
+};
 
-int show = -1;
+
+// A4 as SDA, A5 as SCL
+LiquidCrystal_PCF8574* lcds[2];
+
+void set_backlight(int dspl, bool enable) {
+   lcds[dspl]->setBacklight(enable ? 255 : 0);
+}
+
+
+void set_display_text(int dspl, int line, const char* text) {
+    lcds[dspl]->setCursor(0, line);
+    lcds[dspl]->print(text);
+}
+
+#ifdef SIM
+
+static int s_dspl = 0; // selected display
+static int s_line = 0; // selected line
+
+static void new_message_callback(uint16_t message_id, struct SiMessagePortPayload* payload) {
+  // Do something with a message from Air Manager or Air Player
+
+  // The arguments are only valid within this function!
+  // Make a clone if you want to store it
+  messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Received something with id " + message_id);
+  
+  switch (message_id)
+  {
+    case REFRESH_STATE: break;
+    case ENABLE_DISPLAY_BACKLIGHT: {
+        int dspl = payload->data_int[0];
+        int enable = payload->data_int[1];
+        set_backlight(dspl, enable);
+        messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Enable display " + dspl + " " + enable);
+ 
+        break;
+      }
+    case SET_DISPLAY_TEXT: {
+        switch (payload->type) {
+          case SI_MESSAGE_PORT_DATA_TYPE_INTEGER: {
+              int dspl = payload->data_int[0];
+              int line = payload->data_int[1];
+              s_dspl = dspl;
+              s_line = line;
+              break;
+            }
+          case SI_MESSAGE_PORT_DATA_TYPE_STRING: {
+              const char* text = payload->data_string;
+              set_display_text(s_dspl, s_line, text);
+              break;
+            }
+        }
+        break;
+      }
+  }
+
+}
+#endif
+
 
 void setup()
 {
-  int error;
+#ifdef SIM
+  // Init library on channel A and Arduino type MEGA 2560
+  messagePort = new SiMessagePort(SI_MESSAGE_PORT_DEVICE_ARDUINO_MEGA_2560, SI_MESSAGE_PORT_CHANNEL_H, new_message_callback);
+#else
+  Serial.begin(9600);
+#endif
 
-  Serial.begin(115200);
-  Serial.println("LCD...");
+  lcds[0] = new LiquidCrystal_PCF8574(0x26, 45, 37); // set the LCD address to 0x27 for a 16 chars and 2 line display
+  lcds[1] = new LiquidCrystal_PCF8574(0x27, 27, 19); // set the LCD address to 0x27 for a 16 chars and 2 line display
 
-  // wait on Serial to be available on Leonardo
-  while (!Serial)
-    ;
+  lcds[0]->begin(16, 2); // initialize the lcd
+  lcds[1]->begin(16, 2); // initialize the lcd
 
-  Serial.println("Dose: check for LCD");
-/*
-  // See http://playground.arduino.cc/Main/I2cScanner how to test for a I2C device.
-  Wire.begin();
-  Wire.beginTransmission(0x27);
-  error = Wire.endTransmission();
-  Serial.print("Error: ");
-  Serial.print(error);
+  for (int i = 0; i < 2; ++i) {
+    lcds[i]->begin(16, 2); // initialize the lcd
+    lcds[i]->setBacklight(0);
+    lcds[i]->setCursor(0, 0);
+    lcds[i]->print("188.00   188.88");
+    lcds[i]->setCursor(0, 1);
+    lcds[i]->print("nm kt min hold   loc to fr");
 
-  if (error == 0) {
-    Serial.println(": LCD found.");
-    show = 0;
-    lcd.begin(16, 2); // initialize the lcd
-
-  } else {
-    Serial.println(": LCD not found.");
-  } // if
-*/
-    show = 0;
-    lcd.begin(16, 2); // initialize the lcd
-     lcd2.begin(16, 2); // initialize the lcd
+  }
 
 } // setup()
 
 
 void loop()
 {
-    lcd.setBacklight(255);
-    lcd.setCursor(0, 0);
-    lcd.print("188.00   188.88");
-    lcd.setCursor(0, 1);
-    lcd.print("nm kt min hold   loc to fr");
+#ifdef SIM
+  // Make sure this function is called regularly
+  messagePort->Tick();
+#endif
 
-    lcd2.setBacklight(255);
-    lcd2.setCursor(0, 0);
-    lcd2.print("188.00   188.88");
-    lcd2.setCursor(0, 1);
-    lcd2.print("nm kt min hold   loc to fr");
 } // loop()
