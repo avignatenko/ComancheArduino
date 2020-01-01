@@ -6,6 +6,11 @@
 #ifdef SIM
 #include <si_message_port.hpp>
 SiMessagePort* messagePort;
+
+// upper - H
+// lower - E
+SiMessagePortChannel kChannel = SI_MESSAGE_PORT_CHANNEL_E;
+
 #endif
 
 #include "LiquidCrystal_PCF8574.h"
@@ -37,6 +42,7 @@ enum Messages  {
   KNOB_UPDATED = 3, // payload <int 0 (left), 1 (right) > <int 0 (inner), int 1 (outer)> <int -1 - left, 1 right>
   TOGGLE_PRESSED = 4, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
   ONOFF_PRESSED = 5, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
+  SELECTOR_SET = 6, // payload <mode 0..6>
 };
 
 // setup encoders
@@ -67,6 +73,15 @@ Bounce* btns_onoff[2] = {
   createButton(44),
   createButton(26),
 
+};
+
+Bounce* btns_selector[6] = {
+  createButton(10),
+  createButton(50),
+  createButton(11),
+  createButton(51),
+  createButton(12),
+  createButton(52)
 };
 
 // A4 as SDA, A5 as SCL
@@ -131,16 +146,13 @@ void setup()
 {
 #ifdef SIM
   // Init library on channel A and Arduino type MEGA 2560
-  messagePort = new SiMessagePort(SI_MESSAGE_PORT_DEVICE_ARDUINO_MEGA_2560, SI_MESSAGE_PORT_CHANNEL_E, new_message_callback);
+  messagePort = new SiMessagePort(SI_MESSAGE_PORT_DEVICE_ARDUINO_MEGA_2560, kChannel, new_message_callback);
 #else
   Serial.begin(9600);
 #endif
 
-  lcds[0] = new LiquidCrystal_PCF8574(0x27, 45, 37); // set the LCD address to 0x27 for a 16 chars and 2 line display
+  lcds[0] = new LiquidCrystal_PCF8574(0x26, 45, 37); // set the LCD address to 0x27 for a 16 chars and 2 line display
   lcds[1] = new LiquidCrystal_PCF8574(0x27, 27, 19); // set the LCD address to 0x27 for a 16 chars and 2 line display
-
-  lcds[0]->begin(16, 2); // initialize the lcd
-  lcds[1]->begin(16, 2); // initialize the lcd
 
   for (int i = 0; i < 2; ++i) {
     lcds[i]->begin(16, 2); // initialize the lcd
@@ -149,7 +161,6 @@ void setup()
     lcds[i]->print("188.00   188.88");
     lcds[i]->setCursor(0, 1);
     lcds[i]->print("nm kt min hold   loc to fr");
-
   }
 
   // setup knobs
@@ -197,7 +208,7 @@ void loop()
     }
   }
 
-// check buttons for on/off
+  // check buttons for on/off
   for (int i = 0; i < 2; ++i) {
     bool updated = btns_onoff[i]->update();
     if (updated) {
@@ -209,6 +220,22 @@ void loop()
 #endif
     }
   }
+
+  // check buttons for selector
+  for (int i = 0; i < 6; ++i) {
+    bool updated = btns_selector[i]->update();
+    if (updated && !btns_selector[i]->read()) {
+#ifdef SIM
+      messagePort->SendMessage(SELECTOR_SET, (int32_t)i);
+#else
+      Serial.print("Selector ");
+      Serial.print(i);
+      Serial.println();
+#endif
+    }
+  }
+
+
 
 #ifdef SIM
   // Make sure this function is called regularly

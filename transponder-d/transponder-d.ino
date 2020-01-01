@@ -9,9 +9,31 @@
 SiMessagePort* messagePort;
 #endif
 
+// socket 1 pins
+const int socket1_1 = -1;
+const int socket1_2 = -1;
+const int socket1_3 = 14;
+const int socket1_4 = 23;
+const int socket1_5 = 15;
+const int socket1_6 = 24;
+const int socket1_7 = 16;
+const int socket1_8 = 25;
+const int socket1_9 = 17;
+const int socket1_10 = 26;
+const int socket1_11 = 18;
+const int socket1_12 = 27;
+const int socket1_13 = 19;
+const int socket1_14 = 28;
+const int socket1_15 = 20;
+const int socket1_16 = 29;
+const int socket1_17 = 21;
+const int socket1_18 = 30;
+const int socket1_19 = 22;
+const int socket1_20 = 31;
 
 
-// socker 4 pins
+
+// socket 4 pins
 const int socket4_1 = -1;
 const int socket4_2 = -1;
 const int socket4_3 = 10;
@@ -43,13 +65,52 @@ struct Pin
   int resetPin;
 };
 
+Bounce* make_button(int pin) {
+  pinMode(pin, INPUT_PULLUP);
+  Bounce* btn = new Bounce();
+  btn->attach(pin);
+  btn->interval(30); // interval in ms
+  return btn;
+};
+
+
 const int kNumPins = 4;
 Pin pins[kNumPins] = {{41, 42}, {45, 46}, {36, 37}, {32, 33}};
 Encoder encoders[kNumPins] = {Encoder(43, 44), Encoder(47, 48), Encoder(38, 39), Encoder(34, 35)};
 const int enableDisplayPin = 40;
 
-Bounce* rotator_buttons = new Bounce[10];
-Bounce* ident_button = new Bounce;
+Bounce* rotator_buttons[4] = {
+  make_button(panel2_rot_pos_1),
+  make_button(panel2_rot_pos_2),
+  make_button(panel2_rot_pos_4),
+  make_button(panel2_rot_pos_8),
+};
+
+Bounce* ident_button = make_button(panel2_btn1);
+
+const int kGpsButtonsNum = 15;
+Bounce* gps_buttons[kGpsButtonsNum] = {
+  make_button(socket1_7),
+  make_button(socket1_8),
+  make_button(socket1_9),
+  make_button(socket1_10),
+  make_button(socket1_11),
+  make_button(socket1_12),
+  make_button(socket1_13),
+  make_button(socket1_14),
+  make_button(socket1_15),
+  make_button(socket1_16),
+  make_button(socket1_17),
+  make_button(socket1_18),
+  make_button(socket1_19),
+  make_button(socket1_20),
+};
+
+int gps_button_values[kGpsButtonsNum] = { -1};
+
+// setup gps encoders
+
+Encoder* gps_knobs[2] = {new Encoder(socket1_3, socket1_5), new Encoder(socket1_4, socket1_6)};
 
 int brightness = 0;
 int values[kNumPins] = {0, 0, 0, 0};
@@ -112,17 +173,7 @@ void setup()
 
   // set the digital pin as output:
   pinMode(panel2_led, OUTPUT);
-  ident_button->attach(panel2_btn1, INPUT_PULLUP);
-  ident_button->interval(10);
 
-  rotator_buttons[0].attach(panel2_rot_pos_1, INPUT_PULLUP);
-  rotator_buttons[0].interval(30);              // interval in ms
-  rotator_buttons[1].attach(panel2_rot_pos_2, INPUT_PULLUP);
-  rotator_buttons[1].interval(30);              // interval in ms
-  rotator_buttons[2].attach(panel2_rot_pos_4, INPUT_PULLUP);
-  rotator_buttons[2].interval(30);              // interval in ms
-  rotator_buttons[3].attach(panel2_rot_pos_8, INPUT_PULLUP);
-  rotator_buttons[3].interval(30);              // interval in ms
 
 }
 
@@ -135,6 +186,8 @@ enum Messages  {
   ROTATOR_SWITCHED = 4, // payload: int position (0 .. 9)
   IDENT_PRESSED = 5, // payload: int pressed (0, 1)
   SET_IDENT_LIGHT = 6, // payload: int on/off: 1, 0
+  GPS_BUTTON = 7, // payload: int button, int on/off
+  GPS_KNOB_ROTATED = 8, //, -- payoad: int selector (0 .. 3), int +1 , -1
 };
 
 
@@ -182,6 +235,7 @@ long lastUpdate = 0;
 
 void loop()
 {
+  // transponder rotators
   for (int i = 0 ; i < kNumPins; ++i)
   {
     long newPosition = encoders[i].read();
@@ -197,6 +251,8 @@ void loop()
       //messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Updated " + i + " to: " + newPosition);
       int32_t payload[2] = { i, direction };
       messagePort->SendMessage(ENCODER_DIGIT_ROTATED, payload, 2);
+#else
+        Serial.print(String("transponder: ") + i + " " + direction);
 #endif
     }
   }
@@ -213,7 +269,7 @@ void loop()
   // panel 2
 
   // update buttons before read
-  for (int i = 0; i < 4; ++i) rotator_buttons[i].update();
+  for (int i = 0; i < 4; ++i) rotator_buttons[i]->update();
   ident_button->update();
 
   int btn = !ident_button->read();
@@ -225,10 +281,10 @@ void loop()
   }
 
   // read rotator
-  int btn_rot_1 = !rotator_buttons[0].read();
-  int btn_rot_2 = !rotator_buttons[1].read();
-  int btn_rot_4 = !rotator_buttons[2].read();
-  int btn_rot_8 = !rotator_buttons[3].read();
+  int btn_rot_1 = !rotator_buttons[0]->read();
+  int btn_rot_2 = !rotator_buttons[1]->read();
+  int btn_rot_4 = !rotator_buttons[2]->read();
+  int btn_rot_8 = !rotator_buttons[3]->read();
 
   int newRotatorPos = btn_rot_1 + (btn_rot_2 << 1) + (btn_rot_4 << 2) + (btn_rot_8 << 3);
   if (rotatorPos < 0 || rotatorPos != newRotatorPos) {
@@ -248,9 +304,49 @@ void loop()
 
   }
 #ifndef SIM
-  Serial.println((String)btn_rot_1 + (String)btn_rot_2 + (String)btn_rot_4 + (String)btn_rot_8 + " " + (String)newRotatorPos);
+  //Serial.println((String)btn_rot_1 + (String)btn_rot_2 + (String)btn_rot_4 + (String)btn_rot_8 + " " + (String)newRotatorPos);
   digitalWrite(panel2_led, newRotatorPos == 3);
 #endif
+
+  // gps
+  for (int i = 0; i < 14; ++i) {
+    gps_buttons[i]->update();
+    int btn = !gps_buttons[i]->read();
+#ifndef SIM
+    if (btn) Serial.println((String)"btn pressed " + (String)i);
+#else
+    int& cur_value = gps_button_values[i];
+    if (cur_value < 0 || cur_value != btn) {
+      int32_t payload[2] = { i, btn};
+      messagePort->SendMessage(GPS_BUTTON, payload, 2);
+      cur_value = btn;
+    }
+#endif
+
+    for (int i = 0 ; i < 2; ++i)
+    {
+      long newPosition = gps_knobs[i]->read();
+
+      int direction = 0;
+      if (newPosition >= 2) direction = -1;
+      if (newPosition <= -2) direction = 1;
+
+      if (direction != 0) {
+        gps_knobs[i]->write(0);
+
+#ifdef SIM
+        //messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Updated " + i + " to: " + newPosition);
+        int32_t payload[2] = { i, direction };
+        messagePort->SendMessage(GPS_KNOB_ROTATED, payload, 2);
+#else
+        Serial.print(String("GPS: ") + i + " " + direction);
+#endif
+      }
+    }
+
+
+
+  }
 
 #ifdef SIM
   // Make sure this function is called regularly
