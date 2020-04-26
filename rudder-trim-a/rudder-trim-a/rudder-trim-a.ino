@@ -32,6 +32,27 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
 
 #endif
 
+unsigned long servo_start_time = -1;
+const unsigned long servo_work_duration = 500;
+
+void write_servo(int position) {
+
+  if (position == myServo.read()) {
+    if (servo_start_time < 0) return;
+    if (millis() - servo_start_time > servo_work_duration) {
+      myServo.detach();
+      servo_start_time = -1;
+    }
+    return;  
+  }
+
+  if (!myServo.attached())
+    myServo.attach(9);  // attaches the servo on pin 9 to the servo object
+  
+  myServo.write(position);
+  
+  servo_start_time = millis();
+}
 
 void setup() {
   myServo.attach(9);  // attaches the servo on pin 9 to the servo object
@@ -62,7 +83,7 @@ void loop() {
 
   }
 
-  myServo.write(targetServoAngle);
+  write_servo(targetServoAngle);
 
 #ifdef SIM
   // Make sure this function is called regularly
