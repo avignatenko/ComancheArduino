@@ -35,14 +35,15 @@ SiMessagePortChannel kChannel = SI_MESSAGE_PORT_CHANNEL_E;
 //  A1 - 4 -- port 41
 //  A2 - 6 -- port 42
 
-enum Messages  {
+enum Messages {
   REFRESH_STATE = 0, // payload: none
-  ENABLE_DISPLAY_BACKLIGHT = 1, // payload: <int 0 (left), 1 (right)> <int 0 (disable), 1 (enable)>
-  SET_DISPLAY_TEXT = 2, // payload: <int 0 (left), 1 (right)> <int 0 (line 1), 1 (line 2)> || <string text>
-  KNOB_UPDATED = 3, // payload <int 0 (left), 1 (right) > <int 0 (inner), int 1 (outer)> <int -1 - left, 1 right>
+  ENABLE_DISPLAY_BACKLIGHT = 1, //-- payload: <int 0 (left), 1 (right)> <int 0 (disable), 1 (enable)>
+  SET_DISPLAY_TEXT = 2, //-- payload: <string text> , where text is "XYZZText", X - 0|1, Y - 0|1, ZZ - 0..MAX chars
+  KNOB_UPDATED = 3, //-- payload <int 0 (left), 1 (right) < int 0 (inner), int 1 (outer)> <int -1 - left, 1 right>
   TOGGLE_PRESSED = 4, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
   ONOFF_PRESSED = 5, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
   SELECTOR_SET = 6, // payload <mode 0..6>
+  DISPLAY_TEXT_SET = 7,
 };
 
 // setup encoders
@@ -91,22 +92,19 @@ void set_backlight(int dspl, bool enable) {
   lcds[dspl]->setBacklight(enable ? 255 : 0);
 }
 
-void set_display_text(int dspl, int line, const char* text) {
-  lcds[dspl]->setCursor(0, line);
+void set_display_text(int dspl, int line, int pos, const String& text) {
+  lcds[dspl]->setCursor(pos, line);
   lcds[dspl]->print(text);
 }
 
 #ifdef SIM
-
-static int s_dspl = 0; // selected display
-static int s_line = 0; // selected line
 
 static void new_message_callback(uint16_t message_id, struct SiMessagePortPayload* payload) {
   // Do something with a message from Air Manager or Air Player
 
   // The arguments are only valid within this function!
   // Make a clone if you want to store it
-  messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Received something with id " + message_id);
+  //messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Received something with id " + message_id);
 
   switch (message_id)
   {
@@ -115,29 +113,28 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
         int dspl = payload->data_int[0];
         int enable = payload->data_int[1];
         set_backlight(dspl, enable);
-        messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Enable display " + dspl + " " + enable);
+        //messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Enable display " + dspl + " " + enable);
 
         break;
       }
+
     case SET_DISPLAY_TEXT: {
-        switch (payload->type) {
-          case SI_MESSAGE_PORT_DATA_TYPE_INTEGER: {
-              int dspl = payload->data_int[0];
-              int line = payload->data_int[1];
-              s_dspl = dspl;
-              s_line = line;
-              break;
-            }
-          case SI_MESSAGE_PORT_DATA_TYPE_STRING: {
-              const char* text = payload->data_string;
-              set_display_text(s_dspl, s_line, text);
-              break;
-            }
-        }
+        String text = payload->data_string;
+
+        int dspl = text.substring(0, 1).toInt();
+        int line = text.substring(1, 2).toInt();
+        int pos = text.substring(2, 4).toInt();
+        String text1 = text.substring(4);
+
+        //set_display_text(dspl, line, pos, text1);
+
+        messagePort->SendMessage(DISPLAY_TEXT_SET);
+        messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Text: " + dspl + " " + line + " " + pos);
+        messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Text: " + text1);
+
         break;
       }
   }
-
 }
 #endif
 
