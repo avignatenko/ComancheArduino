@@ -13,7 +13,9 @@ SiMessagePortChannel kChannel = SI_MESSAGE_PORT_CHANNEL_E;
 
 #endif
 
-#include "LiquidCrystal_PCF8574.h"
+#include <Wire.h>
+#include <hd44780.h>                       // main hd44780 header
+#include <hd44780ioClass/hd44780_I2Cexp.h> // i2c expander i/o class header
 
 // own setup:
 // display 1
@@ -35,15 +37,27 @@ SiMessagePortChannel kChannel = SI_MESSAGE_PORT_CHANNEL_E;
 //  A1 - 4 -- port 41
 //  A2 - 6 -- port 42
 
+enum Flags
+{
+  NM = (1 << 0),
+  KT = (1 << 1),
+  MIN = (1 << 2),
+  HLD = (1 << 3),
+  LOC = (1 << 4),
+  TO = (1 << 5),
+  FR = (1 << 6)
+};
+
 enum Messages {
   REFRESH_STATE = 0, // payload: none
-  ENABLE_DISPLAY_BACKLIGHT = 1, //-- payload: <int 0 (left), 1 (right)> <int 0 (disable), 1 (enable)>
-  SET_DISPLAY_TEXT = 2, //-- payload: <string text> , where text is "XYZZText", X - 0|1, Y - 0|1, ZZ - 0..MAX chars
-  KNOB_UPDATED = 3, //-- payload <int 0 (left), 1 (right) < int 0 (inner), int 1 (outer)> <int -1 - left, 1 right>
-  TOGGLE_PRESSED = 4, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
-  ONOFF_PRESSED = 5, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
-  SELECTOR_SET = 6, // payload <mode 0..6>
-  DISPLAY_TEXT_SET = 7,
+  KNOB_UPDATED = 1, //-- payload <int 0 (left), 1 (right) < int 0 (inner), int 1 (outer)> <int -1 - left, 1 right>
+  TOGGLE_PRESSED = 2, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
+  ONOFF_PRESSED = 3, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
+  SELECTOR_SET = 4, // payload <mode 0..6>
+
+  DISPLAYS_ENABLE = 5, // payload: <int 0|1>,
+  SET_DIGITS = 6, // payload: <int 0 (left), 1 (right)> <int 0 (left), 1 (right)> <float>
+  SET_FLAGS = 7, // payload< <int flags>
 };
 
 // setup encoders
@@ -85,8 +99,13 @@ Bounce* btns_selector[6] = {
   createButton(52)
 };
 
-// A4 as SDA, A5 as SCL
-LiquidCrystal_PCF8574* lcds[2];
+hd44780_I2Cexp* lcds[2];
+
+float s_digits[2][2] = {{188.00, 188.01}, {188.02, 0.0}};
+bool s_digits_refresh[2][2] = {{true, true}, {true, true}};
+int s_flags =  NM |  KT | MIN | HLD | LOC | TO | FR;
+
+bool s_flags_refresh = true;
 
 void set_backlight(int dspl, bool enable) {
   lcds[dspl]->setBacklight(enable ? 255 : 0);
@@ -95,6 +114,19 @@ void set_backlight(int dspl, bool enable) {
 void set_display_text(int dspl, int line, int pos, const String& text) {
   lcds[dspl]->setCursor(pos, line);
   lcds[dspl]->print(text);
+}
+
+void display_enable(int dspl, bool enable)
+{
+  set_backlight(0, enable);
+  set_backlight(1, enable);
+
+  if (!enable) {
+    set_display_text(0, 0, 0, "                ");
+    set_display_text(0, 1, 0, "                ");
+    set_display_text(1, 0, 0, "                ");
+    set_display_text(1, 1, 0, "                ");
+  }
 }
 
 #ifdef SIM
@@ -109,31 +141,30 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
   switch (message_id)
   {
     case REFRESH_STATE: break;
-    case ENABLE_DISPLAY_BACKLIGHT: {
+    case DISPLAYS_ENABLE: {
+        int enable = payload->data_int[0];
+        display_enable(0, enable);
+        display_enable(1, enable);
+
+        break;
+      }
+
+    case SET_DIGITS: {
         int dspl = payload->data_int[0];
-        int enable = payload->data_int[1];
-        set_backlight(dspl, enable);
-        //messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Enable display " + dspl + " " + enable);
+        int side = payload->data_int[1];
+        int number = payload->data_int[2];
 
+        s_digits_refresh[dspl][side] = true;
+        s_digits[dspl][side] = number;
         break;
       }
 
-    case SET_DISPLAY_TEXT: {
-        String text = payload->data_string;
-
-        int dspl = text.substring(0, 1).toInt();
-        int line = text.substring(1, 2).toInt();
-        int pos = text.substring(2, 4).toInt();
-        String text1 = text.substring(4);
-
-        //set_display_text(dspl, line, pos, text1);
-
-        messagePort->SendMessage(DISPLAY_TEXT_SET);
-        messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Text: " + dspl + " " + line + " " + pos);
-        messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Text: " + text1);
-
+    case SET_FLAGS: {
+        s_flags_refresh = true;
+        s_flags = payload->data_int[0];
         break;
       }
+
   }
 }
 #endif
@@ -148,17 +179,17 @@ void setup()
   Serial.begin(9600);
 #endif
 
-  lcds[0] = new LiquidCrystal_PCF8574(0x26, 45, 37); // set the LCD address to 0x27 for a 16 chars and 2 line display
-  lcds[1] = new LiquidCrystal_PCF8574(0x27, 27, 19); // set the LCD address to 0x27 for a 16 chars and 2 line display
+  Wire.setClock(400000L);
+
+  lcds[0] = new hd44780_I2Cexp(0x26); // set the LCD address to 0x27 for a 16 chars and 2 line display
+  lcds[1] = new hd44780_I2Cexp(0x27); // set the LCD address to 0x27 for a 16 chars and 2 line display
 
   for (int i = 0; i < 2; ++i) {
     lcds[i]->begin(16, 2); // initialize the lcd
-    lcds[i]->setBacklight(0);
-    lcds[i]->setCursor(0, 0);
-    lcds[i]->print("188.00   188.88");
-    lcds[i]->setCursor(0, 1);
-    lcds[i]->print("nm kt min hold   loc to fr");
   }
+
+  display_enable(0, false);
+  display_enable(1, false);
 
   // setup knobs
   for (int i = 0; i < 2; ++i) {
@@ -171,7 +202,9 @@ void setup()
 
 void loop()
 {
-  // updat knobs
+
+  // update knobs
+
   for (int i = 0; i < 2; ++i) {
     for (int j = 0; j < 2; ++j) {
       int32_t new_pos = knobs[i][j]->read() / 2;
@@ -190,7 +223,7 @@ void loop()
     }
   }
 
-  // updfate buttons
+  // update buttons
 
   // check buttons for swap
   for (int i = 0; i < 2; ++i) {
@@ -232,7 +265,64 @@ void loop()
     }
   }
 
+  //lcds[i]->print("nmktmnhlloctofr");
+  // update monitor
+  if (s_flags_refresh) {
 
+    int pos = 0;
+    String text = "";
+
+    if (s_flags & NM) {
+      pos = 0;
+      text = "nm";
+      set_display_text(1, 1, pos, text);
+    }
+    if (s_flags & KT) {
+      pos = 0;
+      text = "kt";
+      set_display_text(1, 1, pos, text);
+    }
+    if (s_flags & MIN) {
+      pos = 0;
+      text = "min";
+      set_display_text(1, 1, pos, text);
+    }
+    if (s_flags & HLD) {
+      pos = 4;
+      text = "hold";
+      set_display_text(1, 1, pos, text);
+    }
+    if (s_flags & LOC) {
+      pos = 10;
+      text = "loc";
+      set_display_text(1, 1, pos, text);
+    }
+    if (s_flags & TO) {
+      pos = 14;
+      text = "to";
+      set_display_text(1, 1, pos, text);
+    }
+
+    if (s_flags & FR) {
+      pos = 14;
+      text = "fr";
+      set_display_text(1, 1, pos, text);
+    }
+
+
+    s_flags_refresh = false;
+  }
+
+  for (int dspl = 0; dspl < 2; ++dspl)
+    for (int part = 0; part < 2; ++part) {
+      if (!s_digits_refresh[dspl][part])
+        continue;
+
+      String digitText = (s_digits[dspl][part] == 0.0 ? "  --- " : String(s_digits[dspl][part], 2));
+      set_display_text(dspl, 0, part * 10, digitText);
+
+      s_digits_refresh[dspl][part] = false;
+    }
 
 #ifdef SIM
   // Make sure this function is called regularly
