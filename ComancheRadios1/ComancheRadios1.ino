@@ -56,7 +56,7 @@ enum Messages {
   SELECTOR_SET = 4, // payload <mode 0..6>
 
   DISPLAYS_ENABLE = 5, // payload: <int 0|1>,
-  SET_DIGITS = 6, // payload: <int 0 (left), 1 (right)> <int 0 (left), 1 (right)> <float>
+  SET_DIGITS = 6, // payload: <int 0 (left), 1 (right)> <int 0 (left), 1 (right)> <int whole> <int frac>
   SET_FLAGS = 7, // payload< <int flags>
 };
 
@@ -153,9 +153,10 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
         int dspl = payload->data_int[0];
         int side = payload->data_int[1];
         int number = payload->data_int[2];
+        int number_frac = payload->data_int[3];
 
         s_digits_refresh[dspl][side] = true;
-        s_digits[dspl][side] = number;
+        s_digits[dspl][side] = number + number_frac / 100.0;
         break;
       }
 
@@ -265,50 +266,22 @@ void loop()
     }
   }
 
-  //lcds[i]->print("nmktmnhlloctofr");
   // update monitor
   if (s_flags_refresh) {
 
-    int pos = 0;
-    String text = "";
+    // group with pos = 0
+    if (s_flags & NM) set_display_text(1, 1, 0, "nm");
+    if (s_flags & KT) set_display_text(1, 1, 0, "kt");
+    if (s_flags & MIN) set_display_text(1, 1, 0, "min");
+    if ((s_flags & (NM|KT|MIN)) == 0) set_display_text(1, 1, 0, "   ");    
 
-    if (s_flags & NM) {
-      pos = 0;
-      text = "nm";
-      set_display_text(1, 1, pos, text);
-    }
-    if (s_flags & KT) {
-      pos = 0;
-      text = "kt";
-      set_display_text(1, 1, pos, text);
-    }
-    if (s_flags & MIN) {
-      pos = 0;
-      text = "min";
-      set_display_text(1, 1, pos, text);
-    }
-    if (s_flags & HLD) {
-      pos = 4;
-      text = "hold";
-      set_display_text(1, 1, pos, text);
-    }
-    if (s_flags & LOC) {
-      pos = 10;
-      text = "loc";
-      set_display_text(1, 1, pos, text);
-    }
-    if (s_flags & TO) {
-      pos = 14;
-      text = "to";
-      set_display_text(1, 1, pos, text);
-    }
+    set_display_text(1, 1, 4, (s_flags & HLD) ? "hold" : "    ");
+    set_display_text(1, 1, 10, (s_flags & LOC) ? "loc" : "   ");
 
-    if (s_flags & FR) {
-      pos = 14;
-      text = "fr";
-      set_display_text(1, 1, pos, text);
-    }
-
+    // group with pos = 14
+    if (s_flags & TO) set_display_text(1, 1, 14, "to");
+    if (s_flags & FR) set_display_text(1, 1, 14, "fr");
+    if ((s_flags & (TO|FR)) == 0) set_display_text(1, 1, 14, "  ");    
 
     s_flags_refresh = false;
   }
