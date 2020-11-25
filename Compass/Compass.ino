@@ -1,16 +1,30 @@
 #include <AccelStepper.h>
 #include <si_message_port.hpp>
 
-SiMessagePort* messagePort;
-SiMessagePortChannel kChannel = SI_MESSAGE_PORT_CHANNEL_J;
+#define SIM
 
-AccelStepper stepper(AccelStepper::HALF4WIRE, 12, 10, 11, 9); 
-const int kTotalSteps = 4096;
+#ifdef SIM
+SiMessagePort* messagePort;
+SiMessagePortChannel kChannel = SI_MESSAGE_PORT_CHANNEL_K;
+#endif
+
+AccelStepper stepper(AccelStepper::HALF4WIRE, 5, 3, 4, 2);
+const long kTotalSteps = 2038 * 2;
+const long kTotalCalibrationSteps = kTotalSteps * 1.1;
+
+const int kQRD1114Pin = A0; // Sensor output voltage
+
+int g_calibrationStatus = 0;
+int g_minValue[2] = {1024, 1024};
+int g_minPos[2] = { -1, -1};
+
+int s_markDegrees = 310;
 
 enum Mode
 {
   POSITION,
-  SPEED
+  SPEED1,
+  CALIBRATION
 };
 
 Mode s_mode = POSITION;
@@ -20,14 +34,15 @@ enum Messages
   STEPPER_PARAMETERS = 0, // <int - max speed> <int - acceleration>
   STEPPER_MOVE = 1, // <float> - desired position (angle degrees / speed)
   STEPPER_CALIBRATE = 2, // <float> - current position (angle degrees)
-  STEPPER_MODE = 3, // <int mode> 0 - position, 1 - speed
+  STEPPER_AUTO_CALIBRATE = 3, // <float> - mark position (angle degrees)
+  STEPPER_MODE = 4, // <int mode> 0 - position, 1 - speed
 };
 
-//Normalizes any number to an arbitrary range 
-//by assuming the range wraps around when going below min or above max 
-float normalize( const float value, const float start, const float end ) 
+//Normalizes any number to an arbitrary range
+//by assuming the range wraps around when going below min or above max
+float normalize( const float value, const float start, const float end )
 {
-  const float width       = end - start   ;   // 
+  const float width       = end - start   ;   //
   const float offsetValue = value - start ;   // value relative to 0
 
   return ( offsetValue - ( floor( offsetValue / width ) * width ) ) + start ;
@@ -39,8 +54,27 @@ float positionToAngle(long pos) {
 }
 
 long angleToPosition(float angle) {
-  return kTotalSteps * angle / 360.0;
+  return kTotalSteps * normalize(angle, 0.0, 360.0) / 360.0;
 };
+
+void startCalibration(int markDegrees) {
+  s_markDegrees = markDegrees;
+  s_mode = CALIBRATION;
+
+}
+
+void runToAngle(float angle) {
+  float curAngle = positionToAngle(stepper.currentPosition());
+  float newAngle = angle;
+  float d1 = newAngle - curAngle;
+  float d2 = copysign(360 - abs(d1), -d1);
+
+  long delta = angleToPosition(abs(d1) > abs(d2) ? d2 : d1);
+
+  stepper.move(delta);
+}
+
+#ifdef SIM
 
 static void new_message_callback(uint16_t message_id, struct SiMessagePortPayload* payload) {
 
@@ -53,20 +87,10 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
         break;
       }
     case STEPPER_MOVE: {
-        if (s_mode == SPEED) {
+        if (s_mode == SPEED1) {
           stepper.setSpeed(payload->data_float[0]);
-        } else {
-          float curAngle = positionToAngle(stepper.currentPosition());
-          float newAngle = payload->data_float[0];
-
-          float d1 = newAngle - curAngle;  
-          float d2 = copysign(360 - abs(d1), -d1);   
-
-          long delta = angleToPosition(abs(d1) > abs(d2) ? d2 : d1);
-
-          stepper.move(delta);
-
-         //messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"calculated: " + stepper.currentPosition() + " " + curAngle + " " + newAngle + " " + delta);
+        } else if (s_mode == POSITION) {
+          runToAngle(payload->data_float[0]);
         }
         break;
       }
@@ -74,7 +98,10 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
         stepper.setCurrentPosition(angleToPosition(payload->data_float[0]));
         break;
       }
-
+    case STEPPER_AUTO_CALIBRATE: {
+        startCalibration(payload->data_float[0]);
+        break;
+      }
     case STEPPER_MODE: {
         s_mode = (Mode)payload->data_int[0];
         break;
@@ -82,21 +109,87 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
 
   }
 }
+#endif
+
+void calibrate() {
+
+  if (g_calibrationStatus == 0) {
+    g_calibrationStatus = 1;
+    g_minValue[0] = g_minValue[1] = 1024;
+    g_minPos[0] = g_minPos[1] = -1;
+
+    stepper.setCurrentPosition(0);
+    stepper.moveTo(kTotalCalibrationSteps);
+  }
+
+  int proximityADC = analogRead(kQRD1114Pin);
+
+  if (proximityADC < g_minValue[g_calibrationStatus - 1]) {
+    g_minValue[g_calibrationStatus - 1] = proximityADC;
+    g_minPos[g_calibrationStatus - 1] = stepper.currentPosition();
+  }
+
+  if (stepper.distanceToGo() == 0) {
+    if (g_calibrationStatus < 3) { // first or second pass?
+
+#ifndef SIM
+      Serial.println(
+        String("Found min value: ") + g_minValue[g_calibrationStatus - 1] +
+        String(" at ") + g_minPos[g_calibrationStatus - 1]);
+#endif
+      stepper.moveTo(kTotalCalibrationSteps - stepper.currentPosition());
+      ++g_calibrationStatus;
+    }
+
+    if (g_calibrationStatus == 3) {
+      int average = ((g_minPos[0] % kTotalSteps) + (g_minPos[1] % kTotalSteps)) / 2;
+#ifndef SIM
+      Serial.println(String("Average pos: ") + average);
+#endif
+      stepper.runToNewPosition(average);
+      stepper.setCurrentPosition(angleToPosition(s_markDegrees));
+      //stepper.setCurrentPosition(angleToPosition(positionToAngle(-average + stepper.currentPosition()) - s_markDegrees)); 
+      //runToAngle(30);
+      
+      s_mode = POSITION;
+      g_calibrationStatus = 0;
+
+    }
+
+    return;
+  }
+
+  stepper.run();
+
+}
 
 void setup()
 {
+#ifdef SIM
   messagePort = new SiMessagePort(SI_MESSAGE_PORT_DEVICE_ARDUINO_MEGA_2560, kChannel, new_message_callback);
+#endif
 
-  stepper.setMaxSpeed(1000);
-  stepper.setAcceleration(200);
+  stepper.setMaxSpeed(500);
+  stepper.setAcceleration(1000);
+  pinMode(kQRD1114Pin, INPUT);
+
+#ifndef SIM
+  Serial.begin(115200);
+  startCalibration(s_markDegrees);
+#endif
+
 }
 
 void loop()
 {
   if (s_mode == POSITION)
     stepper.run();
-  else
+  else if (s_mode == SPEED1)
     stepper.runSpeed();
-    
+  else if (s_mode == CALIBRATION)
+    calibrate();
+
+#ifdef SIM
   messagePort->Tick();
+#endif
 }
