@@ -1,7 +1,7 @@
 #include <AccelStepper.h>
 #include <si_message_port.hpp>
 
-#define SIM
+//#define SIM
 
 #ifdef SIM
 SiMessagePort* messagePort;
@@ -10,7 +10,7 @@ SiMessagePortChannel kChannel = SI_MESSAGE_PORT_CHANNEL_K;
 
 AccelStepper stepper(AccelStepper::HALF4WIRE, 5, 3, 4, 2);
 const long kTotalSteps = 2038 * 2;
-const long kTotalCalibrationSteps = kTotalSteps * 1.1;
+const long kTotalCalibrationSteps = kTotalSteps * 1.05;
 
 const int kQRD1114Pin = A0; // Sensor output voltage
 
@@ -65,10 +65,10 @@ void startCalibration(int markDegrees) {
 }
 
 void runToAngle(float angle) {
-  float curAngle = positionToAngle(stepper.currentPosition()); // 0
-  float newAngle = angle; // 359
-  float d1 = newAngle - curAngle; // 359
-  float d2 = copysign(360 - abs(d1), -d1); // -1
+  float curAngle = positionToAngle(stepper.currentPosition()); 
+  float newAngle = angle;
+  float d1 = newAngle - curAngle;
+  float d2 = copysign(360 - abs(d1), -d1);
 
   long delta = angleToPosition(abs(d1) > abs(d2) ? d2 : d1);
 
@@ -160,7 +160,7 @@ void calibrate() {
       stepper.runToNewPosition(average);
       stepper.setCurrentPosition(angleToPosition(s_markDegrees));
       //stepper.setCurrentPosition(angleToPosition(positionToAngle(-average + stepper.currentPosition()) - s_markDegrees));
-      runToAngle(0);
+      //runToAngle(0);
 
       s_mode = POSITION;
       g_calibrationStatus = 0;
