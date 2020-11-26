@@ -50,12 +50,13 @@ float normalize( const float value, const float start, const float end )
 }
 
 float positionToAngle(long pos) {
-  return normalize((pos % kTotalSteps) * 360.0 / kTotalSteps, 0.0, 360.0);
+  return normalize(pos * 360.0 / kTotalSteps, 0.0, 360.0);
 }
 
 long angleToPosition(float angle) {
-  return kTotalSteps * normalize(angle, 0.0, 360.0) / 360.0;
+  return kTotalSteps * angle / 360.0;
 };
+
 
 void startCalibration(int markDegrees) {
   s_markDegrees = markDegrees;
@@ -64,12 +65,21 @@ void startCalibration(int markDegrees) {
 }
 
 void runToAngle(float angle) {
-  float curAngle = positionToAngle(stepper.currentPosition());
-  float newAngle = angle;
-  float d1 = newAngle - curAngle;
-  float d2 = copysign(360 - abs(d1), -d1);
+  float curAngle = positionToAngle(stepper.currentPosition()); // 0
+  float newAngle = angle; // 359
+  float d1 = newAngle - curAngle; // 359
+  float d2 = copysign(360 - abs(d1), -d1); // -1
 
   long delta = angleToPosition(abs(d1) > abs(d2) ? d2 : d1);
+
+#ifndef SIM
+  Serial.print(String("cur: ") + curAngle + " ");
+  Serial.print(String("newAngle: ") + newAngle + " ");
+  Serial.print(String("d1: ") + d1 + " ");
+  Serial.print(String("d2: ") + d2 + " ");
+  Serial.print(String("delta: ") + delta + " ");
+  Serial.println();
+#endif
 
   stepper.move(delta);
 }
@@ -103,7 +113,8 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
         break;
       }
     case STEPPER_MODE: {
-        s_mode = (Mode)payload->data_int[0];
+        if (s_mode != CALIBRATION)
+          s_mode = (Mode)payload->data_int[0];
         break;
       }
 
@@ -142,15 +153,15 @@ void calibrate() {
     }
 
     if (g_calibrationStatus == 3) {
-      int average = ((g_minPos[0] % kTotalSteps) + (g_minPos[1] % kTotalSteps)) / 2;
+      int average = (g_minPos[0] + g_minPos[1]) / 2;
 #ifndef SIM
       Serial.println(String("Average pos: ") + average);
 #endif
       stepper.runToNewPosition(average);
       stepper.setCurrentPosition(angleToPosition(s_markDegrees));
-      //stepper.setCurrentPosition(angleToPosition(positionToAngle(-average + stepper.currentPosition()) - s_markDegrees)); 
-      //runToAngle(30);
-      
+      //stepper.setCurrentPosition(angleToPosition(positionToAngle(-average + stepper.currentPosition()) - s_markDegrees));
+      runToAngle(0);
+
       s_mode = POSITION;
       g_calibrationStatus = 0;
 
