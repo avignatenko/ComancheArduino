@@ -59,7 +59,7 @@ void setup() {
   myEnc.write(oldEncPosition);
 #ifdef SIM
   // Init library on channel A
-  messagePort = new SiMessagePort(SI_MESSAGE_PORT_DEVICE_ARDUINO_LEONARDO, SI_MESSAGE_PORT_CHANNEL_A, new_message_callback);
+  messagePort = new SiMessagePort(SI_MESSAGE_PORT_DEVICE_ARDUINO_UNO, SI_MESSAGE_PORT_CHANNEL_A, new_message_callback);
 #else
   Serial.begin(9600);
 #endif
@@ -91,4 +91,3 @@ void loop() {
 #endif
 
 }
-
