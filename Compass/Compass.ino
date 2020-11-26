@@ -1,7 +1,7 @@
 #include <AccelStepper.h>
 #include <si_message_port.hpp>
 
-//#define SIM
+#define SIM
 
 #ifdef SIM
 SiMessagePort* messagePort;
