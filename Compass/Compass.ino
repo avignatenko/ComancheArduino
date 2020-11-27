@@ -10,14 +10,15 @@ SiMessagePortChannel kChannel = SI_MESSAGE_PORT_CHANNEL_K;
 
 AccelStepper stepper(AccelStepper::HALF4WIRE, 5, 3, 4, 2);
 const long kTotalSteps = 2038 * 2;
-const long kTotalCalibrationSteps = kTotalSteps * 1.05;
+const long kTotalCalibrationSteps = kTotalSteps * 1.1;
 
 const int kQRD1114Pin = A0; // Sensor output voltage
 
 int g_calibrationStatus = 0;
 int g_minValue[2] = {1024, 1024};
 int g_minPos[2] = { -1, -1};
-
+int g_savedSpeed = 700;
+int g_savedAcceleration = 1000;
 int s_markDegrees = 310;
 
 enum Mode
@@ -36,6 +37,7 @@ enum Messages
   STEPPER_CALIBRATE = 2, // <float> - current position (angle degrees)
   STEPPER_AUTO_CALIBRATE = 3, // <float> - mark position (angle degrees)
   STEPPER_MODE = 4, // <int mode> 0 - position, 1 - speed
+  STEPPER_AUTO_CALIBRATION_FINISHED = 5
 };
 
 //Normalizes any number to an arbitrary range
@@ -65,7 +67,7 @@ void startCalibration(int markDegrees) {
 }
 
 void runToAngle(float angle) {
-  float curAngle = positionToAngle(stepper.currentPosition()); 
+  float curAngle = positionToAngle(stepper.currentPosition());
   float newAngle = angle;
   float d1 = newAngle - curAngle;
   float d2 = copysign(360 - abs(d1), -d1);
@@ -91,9 +93,13 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
   switch (message_id)
   {
     case STEPPER_PARAMETERS: {
-        messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Received speeds: " + payload->data_int[0] + " " + payload->data_int[1]);
-        stepper.setMaxSpeed(payload->data_int[0]);
-        stepper.setAcceleration(payload->data_int[1]);
+        if (s_mode != CALIBRATION)  {
+          messagePort->DebugMessage(SI_MESSAGE_PORT_LOG_LEVEL_INFO, (String)"Received speeds: " + payload->data_int[0] + " " + payload->data_int[1]);
+          stepper.setMaxSpeed(payload->data_int[0]);
+          stepper.setAcceleration(payload->data_int[1]);
+          g_savedSpeed = payload->data_int[0];
+          g_savedAcceleration = payload->data_int[1];
+        }
         break;
       }
     case STEPPER_MOVE: {
@@ -129,8 +135,10 @@ void calibrate() {
     g_minValue[0] = g_minValue[1] = 1024;
     g_minPos[0] = g_minPos[1] = -1;
 
+    stepper.setMaxSpeed(400);
+    stepper.setAcceleration(1000);
     stepper.setCurrentPosition(0);
-    stepper.moveTo(kTotalCalibrationSteps);
+    stepper.move(kTotalCalibrationSteps);
   }
 
   int proximityADC = analogRead(kQRD1114Pin);
@@ -148,12 +156,19 @@ void calibrate() {
         String("Found min value: ") + g_minValue[g_calibrationStatus - 1] +
         String(" at ") + g_minPos[g_calibrationStatus - 1]);
 #endif
-      stepper.moveTo(kTotalCalibrationSteps - stepper.currentPosition());
+      stepper.move(-kTotalCalibrationSteps);
       ++g_calibrationStatus;
     }
 
     if (g_calibrationStatus == 3) {
-      int average = (g_minPos[0] + g_minPos[1]) / 2;
+      int minPos0Norm = normalize(g_minPos[0], 0, kTotalSteps);
+      int minPos1Norm = normalize(g_minPos[1], 0, kTotalSteps);
+      
+      float d1 = minPos1Norm - minPos0Norm;
+      float d2 = copysign(kTotalSteps - abs(d1), -d1);
+
+      int average = minPos0Norm + (abs(d1) > abs(d2) ? d2 : d1) / 2;
+      //int average = ((g_minPos[0] % kTotalSteps) + (g_minPos[1] % kTotalSteps)) / 2;
 #ifndef SIM
       Serial.println(String("Average pos: ") + average);
 #endif
@@ -161,9 +176,15 @@ void calibrate() {
       stepper.setCurrentPosition(angleToPosition(s_markDegrees));
       //stepper.setCurrentPosition(angleToPosition(positionToAngle(-average + stepper.currentPosition()) - s_markDegrees));
       //runToAngle(0);
+      stepper.setMaxSpeed(g_savedSpeed);
+      stepper.setAcceleration(g_savedAcceleration);
 
       s_mode = POSITION;
       g_calibrationStatus = 0;
+
+#ifdef SIM
+      messagePort->SendMessage(STEPPER_AUTO_CALIBRATION_FINISHED);
+#endif
 
     }
 
