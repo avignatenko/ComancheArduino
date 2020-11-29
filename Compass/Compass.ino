@@ -183,7 +183,8 @@ void calibrate() {
       g_calibrationStatus = 0;
 
 #ifdef SIM
-      messagePort->SendMessage(STEPPER_AUTO_CALIBRATION_FINISHED);
+      int32_t telemetry[3] = {minPos0Norm, minPos1Norm, average};
+      messagePort->SendMessage(STEPPER_AUTO_CALIBRATION_FINISHED, telemetry, 3);
 #endif
 
     }
