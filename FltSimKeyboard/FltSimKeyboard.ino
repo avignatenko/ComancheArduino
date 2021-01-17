@@ -2,7 +2,7 @@
 #include <Keyboard.h>
 #include <Joystick.h>
 
-AmperkaKB KB(7, 6, 5, 4, 3, 2, 1, 0);
+AmperkaKB KB(9, 8, 7, 6, 5, 4, 3, 2);
 Joystick_ joy(0x03, JOYSTICK_TYPE_JOYSTICK, 6, 0, false, false, false, false, false, false, false, false, false, false, false);
  
 void setup()
