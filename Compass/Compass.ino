@@ -37,7 +37,7 @@ enum Messages
   STEPPER_CALIBRATE = 2, // <float> - current position (angle degrees)
   STEPPER_AUTO_CALIBRATE = 3, // <float> - mark position (angle degrees)
   STEPPER_MODE = 4, // <int mode> 0 - position, 1 - speed
-  STEPPER_AUTO_CALIBRATION_FINISHED = 5
+  STEPPER_AUTO_CALIBRATION_FINISHED = 5 // <int - minpos1, int - minpos2, int - average>
 };
 
 //Normalizes any number to an arbitrary range
@@ -183,8 +183,8 @@ void calibrate() {
       g_calibrationStatus = 0;
 
 #ifdef SIM
-      int32_t telemetry[3] = {minPos0Norm, minPos1Norm, average};
-      messagePort->SendMessage(STEPPER_AUTO_CALIBRATION_FINISHED, telemetry, 3);
+      int32_t telemetry[4] = {g_minPos[0], g_minValue[0], g_minPos[1], g_minValue[1]};
+      messagePort->SendMessage(STEPPER_AUTO_CALIBRATION_FINISHED, telemetry, 4);
 #endif
 
     }
