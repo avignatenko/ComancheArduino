@@ -49,14 +49,14 @@ enum Flags
 };
 
 enum Messages {
-  REFRESH_STATE = 0, // payload: none
+  CONNECTED = 0, // payload: none
   KNOB_UPDATED = 1, //-- payload <int 0 (left), 1 (right) < int 0 (inner), int 1 (outer)> <int -1 - left, 1 right>
   TOGGLE_PRESSED = 2, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
   ONOFF_PRESSED = 3, // payload <int 0 (left), 1 (right)> <int 0 released, 1 pressed>
   SELECTOR_SET = 4, // payload <mode 0..6>
 
   DISPLAYS_ENABLE = 5, // payload: <int 0|1>,
-  SET_DIGITS = 6, // payload: <int 0 (left), 1 (right)> <int 0 (left), 1 (right)> <int whole> <int frac>
+  SET_DIGITS = 6, // payload: <int 0 (left), 1 (right)> <int 0 (left), 1 (right)> <int whole> <int frac> <int padding>
   SET_FLAGS = 7, // payload< <int flags>
 };
 
@@ -101,7 +101,32 @@ Bounce* btns_selector[6] = {
 
 hd44780_I2Cexp* lcds[2];
 
-float s_digits[2][2] = {{188.00, 188.01}, {188.02, 0.0}};
+struct FixedPoint
+{
+  FixedPoint(int p1_, int p2_, int padding_): p1(p1_), p2(p2_), padding(padding_) {}
+
+  String to_string() {
+    String  buffer;
+    buffer.reserve(6);
+    buffer = String(p1 + p2 / pow(10, padding), padding);
+    while (buffer.length() < 6) 
+      buffer += ' ';
+
+    return buffer;
+  }
+
+  bool valid() const
+  {
+    return p2 >= 0 && padding >= 0;
+  }
+  
+  int p1;
+  int p2;
+  int padding;
+};
+
+FixedPoint s_digits[2][2] = {{FixedPoint(188, 0, 2), FixedPoint(188, 01, 2)}, {FixedPoint(188, 02, 2), FixedPoint(0, 0, 2)}};
+
 bool s_digits_refresh[2][2] = {{true, true}, {true, true}};
 int s_flags =  NM |  KT | MIN | HLD | LOC | TO | FR;
 
@@ -140,7 +165,6 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
 
   switch (message_id)
   {
-    case REFRESH_STATE: break;
     case DISPLAYS_ENABLE: {
         int enable = payload->data_int[0];
         display_enable(0, enable);
@@ -154,9 +178,10 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
         int side = payload->data_int[1];
         int number = payload->data_int[2];
         int number_frac = payload->data_int[3];
+        int padding = payload->len > 4 ? payload->data_int[4]: 2;
 
         s_digits_refresh[dspl][side] = true;
-        s_digits[dspl][side] = number + number_frac / 100.0;
+        s_digits[dspl][side] = FixedPoint(number, number_frac, padding);
         break;
       }
 
@@ -198,6 +223,10 @@ void setup()
       knobs_positions[i][j] = knobs[i][j]->read() / 2;
     }
   }
+
+#ifdef SIM
+  messagePort->SendMessage(CONNECTED);
+#endif
 } // setup()
 
 
@@ -273,7 +302,7 @@ void loop()
     if (s_flags & NM) set_display_text(1, 1, 0, "nm");
     if (s_flags & KT) set_display_text(1, 1, 0, "kt");
     if (s_flags & MIN) set_display_text(1, 1, 0, "min");
-    if ((s_flags & (NM|KT|MIN)) == 0) set_display_text(1, 1, 0, "   ");    
+    if ((s_flags & (NM | KT | MIN)) == 0) set_display_text(1, 1, 0, "   ");
 
     set_display_text(1, 1, 4, (s_flags & HLD) ? "hold" : "    ");
     set_display_text(1, 1, 10, (s_flags & LOC) ? "loc" : "   ");
@@ -281,7 +310,7 @@ void loop()
     // group with pos = 14
     if (s_flags & TO) set_display_text(1, 1, 14, "to");
     if (s_flags & FR) set_display_text(1, 1, 14, "fr");
-    if ((s_flags & (TO|FR)) == 0) set_display_text(1, 1, 14, "  ");    
+    if ((s_flags & (TO | FR)) == 0) set_display_text(1, 1, 14, "  ");
 
     s_flags_refresh = false;
   }
@@ -291,7 +320,7 @@ void loop()
       if (!s_digits_refresh[dspl][part])
         continue;
 
-      String digitText = (s_digits[dspl][part] == 0.0 ? "  --- " : String(s_digits[dspl][part], 2));
+      String digitText = (!s_digits[dspl][part].valid() ? "  --- " : s_digits[dspl][part].to_string());
       set_display_text(dspl, 0, part * 10, digitText);
 
       s_digits_refresh[dspl][part] = false;
