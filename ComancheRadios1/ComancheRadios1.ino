@@ -108,7 +108,12 @@ struct FixedPoint
   String to_string() {
     String  buffer;
     buffer.reserve(6);
-    buffer = String(p1 + p2 / pow(10, padding), padding);
+    
+    if (padding > 0)
+      buffer = String(p1 + p2 / pow(10, padding), padding);
+    else 
+      buffer = String(p1);
+      
     while (buffer.length() < 6) 
       buffer += ' ';
 
@@ -186,7 +191,7 @@ static void new_message_callback(uint16_t message_id, struct SiMessagePortPayloa
       }
 
     case SET_FLAGS: {
-        s_flags_refresh = true;
+        s_flags_refresh = true; 
         s_flags = payload->data_int[0];
         break;
       }
